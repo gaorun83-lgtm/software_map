@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover" />
+  <title>探索之旅 - 智能旅游地图</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <style>
+    /* 基本布局（响应式，适配手机） */
+    :root {
+      --accent: #2b8aef;
+      --bg: #f6f9fc;
+      --card: #ffffff;
+      --muted: #666;
+    }
+    html,body{height:100%;margin:0;font-family:Helvetica,Arial,'Microsoft YaHei',sans-serif;background:var(--bg);color:#222}
+    .navbar{background:linear-gradient(90deg,#1e90ff,#47b6ff);color:#fff;padding:10px 12px;position:sticky;top:0;z-index:1000}
+    .nav-container{display:flex;align-items:center;justify-content:space-between;max-width:1200px;margin:0 auto}
+    .nav-logo h1{font-size:18px;margin:0}
+    .nav-menu{display:flex;gap:10px}
+    .nav-link{color:rgba(255,255,255,0.9);text-decoration:none;padding:6px 10px;border-radius:6px;font-size:14px}
+    .nav-link.active{background:rgba(255,255,255,0.12)}
+    .main-container{display:flex;gap:12px;max-width:1200px;margin:12px auto;padding:0 12px;box-sizing:border-box}
+    aside.sidebar{width:320px;min-width:260px;background:var(--card);border-radius:8px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,0.08);height:calc(100vh - 92px);overflow:auto}
+    main.map-container{flex:1;position:relative;height:calc(100vh - 92px)}
+    #map{height:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.08)}
+    .search-box{display:flex;gap:6px}
+    .search-box input{flex:1;padding:8px;border:1px solid #e3e9ef;border-radius:6px}
+    .search-box button{padding:8px;border-radius:6px;border:0;background:var(--accent);color:#fff}
+    h3,h4{margin:6px 0 10px 0;font-weight:600}
+    .filter-group{display:flex;flex-wrap:wrap;gap:6px}
+    .filter-item{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted)}
+    .results-list{margin-top:8px;display:flex;flex-direction:column;gap:8px}
+    .result-card{padding:8px;border-radius:6px;border:1px solid #eef5ff;background:#fbfdff;display:flex;justify-content:space-between;align-items:center}
+    .control-row{display:flex;gap:6px;margin-top:8px}
+    .control-btn{padding:8px;border-radius:6px;border:0;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.06)}
+    .trip-editor{margin-top:12px;border-top:1px dashed #eee;padding-top:12px}
+    .trip-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .trip-item{display:flex;justify-content:space-between;align-items:center;padding:8px;border-radius:6px;border:1px solid #f0f3f8;background:#fff}
+    .small{font-size:12px;color:var(--muted)}
+    .btn{padding:8px 10px;border-radius:6px;border:0;background:var(--accent);color:#fff}
+    label.row{display:flex;flex-direction:column;font-size:13px;margin-bottom:8px}
+    input[type="text"], input[type="datetime-local"], select, textarea{padding:8px;border:1px solid #e9eef5;border-radius:6px}
+    textarea{min-height:64px;resize:vertical}
+    .map-controls{position:absolute;right:12px;top:12px;display:flex;flex-direction:column;gap:8px;z-index:600}
+    .chip{padding:6px 8px;border-radius:20px;border:1px solid #e6eefc;background:#fff;font-size:13px}
+     
+footer.note{max-width:1200px;margin:8px auto 40px;padding:0 12px;color:#666;font-size:13px}
+    
+    /* 真实路径相关样式 */
+    .distance-real {
+      background: #fff3cd !important;
+      border-color: #ff6b35 !important;
+      color: #856404;
+    }
+    
+    .loading {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    
+    .route-info {
+      background: white;
+      padding: 8px;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      border-left: 4px solid #ff6b35;
+    }
+    
+    @media (max-width:900px){
+      aside.sidebar{display:none}
+      .main-container{padding:0}
+    }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div class="nav-container">
+      <div class="nav-logo"><h1>🌍 探索之旅</h1></div>
+      <div class="nav-menu">
+        <a class="nav-link active">地图</a >
+        <a class="nav-link">行程</a >
+        <a class="nav-link">收藏</a >
+        <a class="nav-link">我的</a >
+      </div>
+    </div>
+  </nav>
+
+  <div class="main-container">
+    <!-- 侧边栏（手机窄屏时隐藏，可用按钮展开） -->
+    <aside class="sidebar" id="sidebar">
+      <div class="search-section">
+        <h3>探索目的地</h3>
+        <div class="search-box">
+          <input id="search-input" type="text" placeholder="搜索地点或输入经度,纬度 (例如: 39.9,116.4)">
+          <button id="search-btn">🔍</button>
+        </div>
+        <div class="control-row" style="margin-top:8px">
+          <button id="locate-btn" class="btn">📍 定位我</button>
+          <button id="add-manual-btn" class="control-btn">➕ 手动添加</button>
+          <button id="share-current-btn" class="control-btn" title="分享当前行程到 URL">🔗 分享</button>
+<button id="real-route-btn" class="control-btn">🛣️ 真实路径</button>
+        </div>
+      </div>
+
+      <div class="filter-section" style="margin-top:12px">
+        <h4>分类筛选</h4>
+        <div class="filter-group">
+          <label class="filter-item"><input type="checkbox" name="category" value="attraction" checked> 旅游景点</label>
+          <label class="filter-item"><input type="checkbox" name="category" value="restaurant" checked> 美食餐厅</label>
+          <label class="filter-item"><input type="checkbox" name="category" value="hotel" checked> 住宿酒店</label>
+          <label class="filter-item"><input type="checkbox" name="category" value="shopping" checked> 购物中心</label>
+        </div>
+      </div>
+
+      <div class="results-section">
+        <h4>搜索结果</h4>
+        <div id="search-results" class="results-list">
+          <!-- 动态填充 -->
+        </div>
+      </div>
+
+      <div class="trip-editor">
+        <h4>行程编辑</h4>
+        <label class="row">当前使用者（用户名，用于本地保存）：
+          <input id="username" type="text" placeholder="例如：张三">
+        </label>
+        <label class="row">行程名称：
+          <input id="trip-name" type="text" placeholder="例如：北京三日游">
+        </label>
+        <label class="row">开始日期/时间：
+          <input id="trip-start" type="datetime-local">
+        </label>
+        <label class="row">交通方式：
+          <select id="transport-mode">
+            <option value="walk">步行</option>
+            <option value="car">自驾/出租</option>
+            <option value="public">公共交通</option>
+            <option value="bike">骑行</option>
+          </select>
+        </label>
+        <label class="row">备注：
+          <textarea id="trip-notes" placeholder="填写住宿、预算、联系人等"></textarea>
+        </label>
+
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button id="save-trip-btn" class="btn">💾 保存行程</button>
+          <button id="export-trip-btn" class="control-btn">⬇ 导出 JSON</button>
+          <button id="import-trip-btn" class="control-btn">⬆ 导入 JSON</button>
+          <input id="import-file" type="file" accept=".json" style="display:none">
+        </div>
+
+        <h4 style="margin-top:12px">当前行程地点</h4>
+        <div id="trip-places" class="trip-list small"></div>
+
+        <h4 style="margin-top:12px">已保存行程</h4>
+        <div id="saved-trips" class="trip-list"></div>
+      </div>
+    </aside>
+
+    <!-- 地图区域 -->
+    <main class="map-container">
+      <div id="map"></div>
+      <div class="map-controls" aria-hidden>
+        <div class="chip" id="distance-chip">总距: 0 km</div>
+        <button id="toggle-sidebar" class="control-btn" title="显示/隐藏侧栏">☰</button>
+      </div>
+    </main>
+  </div>
+
+  <footer class="note">
+提示：点击地图添加地点 → 填写时间/交通/备注 → 保存行程。点击“分享”会把当前行程编码到页面 URL，复制 URL 发送给朋友即可查看该行程（不含隐私数据）。
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script>
+    // ---------- 工具与数据结构说明 ----------
+    // localStorage 数据结构（示例）
+    // trips_store = {
+    //   users: {
+    //     "张三": [ tripObj, tripObj, ... ],
+    //     "李四": [ ... ]
+    //   }
+    // }
+    //
+    // tripObj = {
+    //   id, name, start, transport, notes, places: [{id, name, lat, lng, time, note}], createdAt
+    // }
+    //
+    // 分享：把单个 tripObj base64(JSON) 放到 URL 参数 `share`
+    // ---------- 初始化 ----------
+    const map = L.map('map').setView([39.9042, 116.4074], 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap contributors' }).addTo(map);
+
+    // state
+    let currentTrip = { id: genId(), name: '', start: null, transport: 'walk', notes: '', places: [] };
+let markers = []; // leaflet markers for currentTrip
+let polyline = null;
+let realRoutePolyline = null; // 新增：真实路径图层
+let routeControl = null; // 新增：路线控制
+
+    // DOM
+    const searchInput = document.getElementById('search-input');
+    const searchBtn = document.getElementById('search-btn');
+    const searchResults = document.getElementById('search-results');
+    const tripPlacesEl = document.getElementById('trip-places');
+    const usernameEl = document.getElementById('username');
+    const tripNameEl = document.getElementById('trip-name');
+    const tripStartEl = document.getElementById('trip-start');
+    const transportEl = document.getElementById('transport-mode');
+    const tripNotesEl = document.getElementById('trip-notes');
+    const saveTripBtn = document.getElementById('save-trip-btn');
+    const savedTripsEl = document.getElementById('saved-trips');
+    const exportBtn = document.getElementById('export-trip-btn');
+    const importBtn = document.getElementById('import-trip-btn');
+    const importFile = document.getElementById('import-file');
+    const locateBtn = document.getElementById('locate-btn');
+    const addManualBtn = document.getElementById('add-manual-btn');
+    const shareBtn = document.getElementById('share-current-btn');
+const realRouteBtn = document.getElementById('real-route-btn'); // 新增
+    const distanceChip = document.getElementById('distance-chip');
+    const toggleSidebarBtn = document.getElementById('toggle-sidebar');
+    const sidebar = document.getElementById('sidebar');
+
+    // 事件绑定
+    map.on('click', onMapClick);
+    searchBtn.addEventListener('click', onSearch);
+    saveTripBtn.addEventListener('click', onSaveTrip);
+    exportBtn.addEventListener('click', onExportTrip);
+    importBtn.addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', onImportFile);
+    locateBtn.addEventListener('click', onLocateMe);
+    addManualBtn.addEventListener('click', onAddManual);
+    shareBtn.addEventListener('click', onShareCurrent);
+realRouteBtn.addEventListener('click', onRealRoute); // 新增
+    toggleSidebarBtn.addEventListener('click', () => { sidebar.style.display = sidebar.style.display === 'none' ? 'block' : 'none'; });
+
+    // 页面加载时检查 URL share 参数
+    (function initFromUrl() {
+      const urlParams = new URLSearchParams(location.search);
+      const share = urlParams.get('share');
+      if (share) {
+        try {
+          const json = JSON.parse(atob(decodeURIComponent(share)));
+          // 显示只读视图的当前Trip（不覆盖本地数据）
+          currentTrip = json;
+          renderCurrentTrip();
+          drawTripOnMap();
+        } catch (e) {
+          console.warn('分享解析失败', e);
+        }
+      } else {
+        loadSavedTripsUI();
+      }
+    })();
+
+    // ---------- 地图添加地点 ----------
+    function onMapClick(e) {
+      const lat = e.latlng.lat, lng = e.latlng.lng;
+      const name = prompt('为此地点命名（例如：故宫）或留空使用坐标：') || `地点 ${lat.toFixed(5)},${lng.toFixed(5)}`;
+      if (name === null) return;
+      const place = { id: genId(), name, lat, lng, time: '', note: '' };
+      currentTrip.places.push(place);
+      addMarkerForPlace(place);
+      renderCurrentTrip();
+      drawTripOnMap();
+    }
+
+    function addMarkerForPlace(place) {
+      const m = L.marker([place.lat, place.lng], { title: place.name }).addTo(map)
+        .bindPopup(`<b>${escapeHtml(place.name)}</b><br><button data-id="${place.id}" class="goto-btn">聚焦</button> <button data-id="${place.id}" class="del-btn">删除</button>`);
+      m.on('popupopen', () => {
+        setTimeout(() => {
+          attachPopupButtons();
+        }, 50);
+      });
+      markers.push({ id: place.id, marker: m });
+    }
+
+    function attachPopupButtons() {
+      document.querySelectorAll('.goto-btn').forEach(btn => {
+        btn.onclick = () => {
+          const id = btn.getAttribute('data-id'); const p = currentTrip.places.find(x => x.id === id);
+          if (p) map.setView([p.lat, p.lng], 15);
+        };
+      });
+      document.querySelectorAll('.del-btn').forEach(btn => {
+        btn.onclick = () => {
+          const id = btn.getAttribute('data-id'); removePlaceById(id);
+        };
+      });
+    }
+
+    // ---------- 搜索（简易：如果输入 "lat,lng" 则直接解析；否则尝试 Nominatim 简单请求） ----------
+    async function onSearch() {
+      const q = searchInput.value.trim();
+      searchResults.innerHTML = '';
+      if (!q) return;
+      // 检查是否为经纬度对
+      const latlng = q.split(',').map(s => s.trim()).map(Number);
+      if (latlng.length === 2 && !isNaN(latlng[0]) && !isNaN(latlng[1])) {
+        const res = [{ display_name: `位置 ${latlng[0].toFixed(5)}, ${latlng[1].toFixed(5)}`, lat: latlng[0], lon: latlng[1] }];
+        renderSearchResults(res);
+        return;
+      }
+      // 使用 OSM Nominatim（无 API key，但请注意流量限制；作为原型可用）
+      try {
+        const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6`);
+        const j = await r.json();
+        renderSearchResults(j);
+      } catch (e) {
+        searchResults.innerHTML = `<div class="result-card">搜索失败（请检查网络）</div>`;
+      }
+    }
+
+    function renderSearchResults(list) {
+      searchResults.innerHTML = '';
+      if (!list || !list.length) {
+        searchResults.innerHTML = `<div class="result-card">未找到结果</div>`; return;
+      }
+      list.forEach((item) => {
+        const name = item.display_name || item.name || `${item.lat},${item.lon}`;
+        const card = document.createElement('div'); card.className = 'result-card';
+        card.innerHTML = `<div style="flex:1"><div style="font-weight:600">${escapeHtml(name)}</div><div class="small">${item.type||''}</div></div>
+                          <div style="display:flex;flex-direction:column;gap:6px">
+                            <button class="control-btn add-place" data-lat="${item.lat||item.lat}" data-lng="${item.lon||item.lon}" data-name="${escapeAttr(name)}">➕ 添加</button>
+                            <button class="control-btn goto-result" data-lat="${item.lat||item.lat}" data-lng="${item.lon||item.lon}">🔎 查看</button>
+                          </div>`;
+        searchResults.appendChild(card);
+      });
+      // bind buttons
+      document.querySelectorAll('.add-place').forEach(btn => {
+        btn.onclick = () => {
+          const lat = parseFloat(btn.dataset.lat), lng = parseFloat(btn.dataset.lng), name = btn.dataset.name;
+          const place = { id: genId(), name, lat, lng, time: '', note: '' };
+          currentTrip.places.push(place);
+          addMarkerForPlace(place);
+          renderCurrentTrip();
+          drawTripOnMap();
+        };
+      });
+      document.querySelectorAll('.goto-result').forEach(btn => {
+        btn.onclick = () => {
+          const lat = parseFloat(btn.dataset.lat), lng = parseFloat(btn.dataset.lng);
+          map.setView([lat, lng], 15);
+        };
+      });
+    }
+
+    // ---------- 行程操作（保存/加载/导出/导入） ----------
+    function onSaveTrip() {
+      const username = (usernameEl.value || 'guest').trim();
+if (!username) alert('请填写用户名用于保存'); 
+      currentTrip.name = tripNameEl.value || currentTrip.name || `行程 ${new Date().toLocaleString()}`;
+      currentTrip.start = tripStartEl.value || currentTrip.start;
+      currentTrip.transport = transportEl.value;
+      currentTrip.notes = tripNotesEl.value;
+      currentTrip.updatedAt = new Date().toISOString();
+
+      const store = loadStore();
+      store.users = store.users || {};
+      store.users[username] = store.users[username] || [];
+      // 如果已存在相同 id，替换；否则 push
+      const idx = store.users[username].findIndex(t => t.id === currentTrip.id);
+      if (idx >= 0) store.users[username][idx] = currentTrip;
+      else store.users[username].push(currentTrip);
+      saveStore(store);
+      alert('已保存到本地（localStorage）');
+      loadSavedTripsUI();
+    }
+
+    function onExportTrip() {
+      const blob = new Blob([JSON.stringify(currentTrip, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = `${(currentTrip.name||'trip').replace(/\s+/g,'_')}.json`; a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function onImportFile(e) {
+      const f = e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const obj = JSON.parse(reader.result);
+          // 将导入的 trip 设为当前并渲染
+          currentTrip = obj;
+          renderCurrentTrip();
+          clearMapMarkers();
+          currentTrip.places.forEach(p => addMarkerForPlace(p));
+          drawTripOnMap();
+          alert('已导入并载入为当前行程（仅本地）');
+        } catch (err) {
+          alert('JSON 解析失败');
+        }
+      };
+      reader.readAsText(f);
+    }
+
+    function loadSavedTripsUI() {
+      savedTripsEl.innerHTML = '';
+      const store = loadStore();
+      if (!store.users) return;
+      const username = (usernameEl.value || 'guest').trim();
+      const users = Object.keys(store.users);
+      // show grouped by user
+      users.forEach(u => {
+        const header = document.createElement('div'); header.className = 'small'; header.style.fontWeight = '600'; header.textContent = u;
+        savedTripsEl.appendChild(header);
+        store.users[u].forEach(trip => {
+          const item = document.createElement('div'); item.className = 'trip-item';
+          item.innerHTML = `<div>
+                              <div style="font-weight:600">${escapeHtml(trip.name||'无名')}</div>
+                              <div class="small">${trip.start||''} · ${trip.places?trip.places.length:0} 地点</div>
+                            </div>
+                            <div style="display:flex;gap:6px;flex-direction:column">
+                              <button class="control-btn load-trip" data-user="${u}" data-id="${trip.id}">加载</button>
+                              <button class="control-btn del-trip" data-user="${u}" data-id="${trip.id}">删除</button>
+                            </div>`;
+          savedTripsEl.appendChild(item);
+        });
+      });
+      // bind
+      document.querySelectorAll('.load-trip').forEach(btn => {
+        btn.onclick = () => {
+          const user = btn.dataset.user, id = btn.dataset.id;
+          const store = loadStore();
+          const trip = (store.users && store.users[user] || []).find(t => t.id === id);
+          if (trip) {
+            currentTrip = JSON.parse(JSON.stringify(trip)); // clone
+            renderCurrentTrip();
+            clearMapMarkers();
+            currentTrip.places.forEach(p => addMarkerForPlace(p));
+            drawTripOnMap();
+          }
+        };
+      });
+      document.querySelectorAll('.del-trip').forEach(btn => {
+        btn.onclick = () => {
+          if (!confirm('确认删除该行程（仅本地）？')) return;
+          const user = btn.dataset.user, id = btn.dataset.id;
+          const store = loadStore();
+          store.users[user] = (store.users[user] || []).filter(t => t.id !== id);
+          saveStore(store);
+          loadSavedTripsUI();
+        };
+      });
+    }
+
+    // ---------- 渲染当前行程地点面板 ----------
+    function renderCurrentTrip() {
+      tripNameEl.value = currentTrip.name || '';
+      tripStartEl.value = currentTrip.start || '';
+      transportEl.value = currentTrip.transport || 'walk';
+      tripNotesEl.value = currentTrip.notes || '';
+      // list places
+      tripPlacesEl.innerHTML = '';
+      if (!currentTrip.places) currentTrip.places = [];
+      currentTrip.places.forEach((p,i) => {
+        const row = document.createElement('div'); row.className = 'trip-item';
+        row.innerHTML = `<div>
+            <div style="font-weight:600">${escapeHtml(p.name)}</div>
+            <div class="small">${p.time||''} ${p.note?('· '+escapeHtml(p.note)):''}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-direction:column">
+            <button class="control-btn focus" data-id="${p.id}">🔎</button>
+            <button class="control-btn edit" data-id="${p.id}">✎</button>
+          </div>`;
+        tripPlacesEl.appendChild(row);
+      });
+      // bind place buttons
+      tripPlacesEl.querySelectorAll('.focus').forEach(b => { b.onclick = ()=>{ const id=b.dataset.id; const p=currentTrip.places.find(x=>x.id===id); if(p) map.setView([p.lat,p.lng],15); }; });
+      tripPlacesEl.querySelectorAll('.edit').forEach(b => { b.onclick = ()=>{ editPlacePopup(b.dataset.id); }; });
+      // update saved trips UI
+      loadSavedTripsUI();
+      updateDistanceChip();
+    }
+
+    function editPlacePopup(id) {
+      const p = currentTrip.places.find(x => x.id === id);
+      if (!p) return;
+      const newName = prompt('地点名称：', p.name);
+      if (newName === null) return;
+      p.name = newName;
+      const newTime = prompt('到达时间（可留空）：', p.time||'');
+      if (newTime !== null) p.time = newTime;
+      const newNote = prompt('备注（可留空）：', p.note||'');
+      if (newNote !== null) p.note = newNote;
+      renderCurrentTrip();
+      // update marker popup if exists
+      const mk = markers.find(m => m.id === id);
+      if (mk) mk.marker.bindPopup(`<b>${escapeHtml(p.name)}</b><br><button data-id="${p.id}" class="goto-btn">聚焦</button> <button data-id="${p.id}" class="del-btn">删除</button>`);
+    }
+
+    function removePlaceById(id) {
+      currentTrip.places = currentTrip.places.filter(p => p.id !== id);
+      // remove marker
+      const idx = markers.findIndex(m => m.id === id);
+      if (idx >= 0) { map.removeLayer(markers[idx].marker); markers.splice(idx,1); }
+      renderCurrentTrip(); drawTripOnMap();
+    }
+
+    // ---------- 地图绘制路线 & 估算距离 ----------
+       function drawTripOnMap() {
+      if (polyline) {
+        map.removeLayer(polyline);
+        polyline = null;
+      }
+      // 清除真实路径显示
+      if (realRoutePolyline) {
+        map.removeLayer(realRoutePolyline);
+        realRoutePolyline = null;
+      }
+      // 恢复距离芯片样式
+      distanceChip.style.background = '';
+      distanceChip.style.borderColor = '';
+      
+      if (!currentTrip.places || currentTrip.places.length < 2) {
+        updateDistanceChip();
+        return;
+      }
+      
+      const latlngs = currentTrip.places.map(p => [p.lat, p.lng]);
+      polyline = L.polyline(latlngs, { 
+        color: '#2b8aef', 
+        weight: 4, 
+        opacity: 0.6,
+        dashArray: '5, 10' // 虚线表示这是直线距离
+      }).addTo(map);
+      
+      map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+      updateDistanceChip();
+    }
+
+    function updateDistanceChip() {
+      let d = 0;
+      const ps = currentTrip.places || [];
+      for (let i=1;i<ps.length;i++) d += haversine(ps[i-1].lat,ps[i-1].lng, ps[i].lat,ps[i].lng);
+      distanceChip.textContent = `总距: ${d.toFixed(2)} km`;
+    }
+
+    // haversine km
+    function haversine(lat1,lon1,lat2,lon2) {
+      const toRad = x => x * Math.PI / 180;
+      const R = 6371;
+      const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+      const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    // ---------- 帮助方法：本地存储 ----------
+    function loadStore() {
+      try { return JSON.parse(localStorage.getItem('trips_store') || '{}'); } catch(e) { return {}; }
+    }
+    function saveStore(obj) { localStorage.setItem('trips_store', JSON.stringify(obj)); }
+
+        function clearMapMarkers() {
+      markers.forEach(mo => { try { map.removeLayer(mo.marker); } catch(e){} });
+      markers = [];
+      if (polyline) { map.removeLayer(polyline); polyline = null; }
+      if (realRoutePolyline) { map.removeLayer(realRoutePolyline); realRoutePolyline = null; } // 新增
+      // 恢复距离芯片
+      distanceChip.style.background = '';
+      distanceChip.style.borderColor = '';
+      updateDistanceChip();
+    }
+
+    // ---------- 定位、手动添加、分享 ----------
+    function onLocateMe() {
+      if (!navigator.geolocation) return alert('浏览器不支持定位');
+      navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude, lng = pos.coords.longitude;
+        map.setView([lat,lng],14);
+        const place = { id: genId(), name: '我的位置', lat, lng, time:'', note:'' };
+        currentTrip.places.push(place);
+        addMarkerForPlace(place); renderCurrentTrip(); drawTripOnMap();
+      }, err => alert('定位失败：' + err.message));
+    }
+
+    function onAddManual() {
+      const name = prompt('地点名称：'); if (name===null) return;
+      const lat = parseFloat(prompt('纬度 (例如 39.9)：')); if (isNaN(lat)) return alert('非法纬度');
+      const lng = parseFloat(prompt('经度 (例如 116.4)：')); if (isNaN(lng)) return alert('非法经度');
+      const place = { id: genId(), name, lat, lng, time: '', note: '' };
+      currentTrip.places.push(place);
+      addMarkerForPlace(place); renderCurrentTrip(); drawTripOnMap();
+    }
+
+    function onShareCurrent() {
+      const toShare = JSON.parse(JSON.stringify(currentTrip));
+      // base64 编码（URI encoded 后再 btoa）
+      const s = encodeURIComponent(btoa(JSON.stringify(toShare)));
+      const url = `${location.origin}${location.pathname}?share=${s}`;
+      window.prompt('复制下面的链接分享给他人（打开后会载入此行程）', url);
+    }
+
+    // ---------- 真实路径导航功能 ----------
+    async function onRealRoute() {
+      if (!currentTrip.places || currentTrip.places.length < 2) {
+        alert('至少需要两个地点才能计算路径');
+        return;
+      }
+
+      try {
+        // 显示加载状态
+        realRouteBtn.innerHTML = '🔄 计算中...';
+        realRouteBtn.disabled = true;
+
+        // 清除之前的真实路径
+        if (realRoutePolyline) {
+          map.removeLayer(realRoutePolyline);
+          realRoutePolyline = null;
+        }
+        if (routeControl) {
+          map.removeControl(routeControl);
+          routeControl = null;
+        }
+
+        // 根据交通方式选择OSRM配置文件
+        const profile = getOSRMProfile(currentTrip.transport);
+        
+        // 构建坐标字符串：经度,纬度;经度,纬度...
+        const coordinates = currentTrip.places.map(place => 
+          `${place.lng},${place.lat}`
+        ).join(';');
+
+        // 调用OSRM API
+        const url = `https://router.project-osrm.org/route/v1/${profile}/${coordinates}?overview=full&geometries=geojson`;
+        
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.code !== 'Ok') {
+          throw new Error('路径计算失败: ' + data.message);
+        }
+
+        // 提取路径几何数据
+        const route = data.routes[0];
+        const routeGeometry = route.geometry;
+        
+        // 在地图上绘制真实路径
+        realRoutePolyline = L.geoJSON(routeGeometry, {
+          style: {
+            color: '#ff6b35',
+            weight: 6,
+            opacity: 0.8,
+            lineCap: 'round',
+            lineJoin: 'round'
+          }
+        }).addTo(map);
+
+        // 更新距离显示（使用真实路径距离）
+        const realDistance = (route.distance / 1000).toFixed(2); // 转换为公里
+        distanceChip.textContent = `真实距离: ${realDistance} km`;
+        distanceChip.style.background = '#fff3cd';
+        distanceChip.style.borderColor = '#ff6b35';
+
+        // 添加路径信息弹出窗口
+        realRoutePolyline.bindPopup(`
+          <div style="min-width: 200px">
+            <strong>路径信息</strong><br>
+            距离: ${realDistance} km<br>
+            预计时间: ${formatDuration(route.duration)}<br>
+            交通方式: ${getTransportName(currentTrip.transport)}
+          </div>
+        `);
+
+        // 自动调整地图视野显示整个路径
+        map.fitBounds(realRoutePolyline.getBounds(), { padding: [40, 40] });
+
+        alert(`真实路径计算完成！距离: ${realDistance} km，预计时间: ${formatDuration(route.duration)}`);
+
+      } catch (error) {
+        console.error('路径计算错误:', error);
+        alert('路径计算失败，请检查网络连接或稍后重试');
+        
+        // 降级方案：使用直线路径
+        drawTripOnMap();
+      } finally {
+        // 恢复按钮状态
+        realRouteBtn.innerHTML = '🛣️ 真实路径';
+        realRouteBtn.disabled = false;
+      }
+    }
+
+    function getOSRMProfile(transport) {
+      const profiles = {
+        'car': 'driving',
+        'walk': 'walking',
+        'bike': 'cycling',
+        'public': 'driving' // OSRM没有专门的公共交通模式，使用驾车作为近似
+      };
+      return profiles[transport] || 'driving';
+    }
+
+    function getTransportName(transport) {
+      const names = {
+        'car': '驾车',
+        'walk': '步行',
+        'bike': '骑行',
+        'public': '公共交通'
+      };
+      return names[transport] || '驾车';
+    }
+
+    function formatDuration(seconds) {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      
+      if (hours > 0) {
+        return `${hours}小时${minutes}分钟`;
+      } else {
+        return `${minutes}分钟`;
+      }
+    }
+
+    // ---------- 小工具 ----------
+    function genId() { return 't' + Math.random().toString(36).slice(2,9); }
+    function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+    function escapeAttr(s){ return String(s).replace(/"/g,'&quot;'); }
+
+
+
+    // ---------- 加载已保存行程界面（初次） ----------
+    renderCurrentTrip();
+    loadSavedTripsUI();
+  </script>
+</body>
+</html>
